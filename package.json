@@ -1,0 +1,45 @@
+{
+  "name": "youtube-english-learning-tools",
+  "displayName": "Tools for Learning English in YouTube",
+  "version": "0.1.0",
+  "description": "Chrome/Edge extension for YouTube English learning with transcript, hover translation, and vocabulary capture.",
+  "author": "Tools for Learning English in YouTube contributors",
+  "scripts": {
+    "dictionary:build": "node scripts/build-ecdict-dictionary.mjs",
+    "dev": "plasmo dev",
+    "build": "plasmo build",
+    "package": "plasmo package"
+  },
+  "dependencies": {
+    "dexie": "^4.4.2",
+    "plasmo": "0.90.5",
+    "react": "18.2.0",
+    "react-dom": "18.2.0",
+    "tailwindcss": "3.4.1",
+    "uuid": "^14.0.0"
+  },
+  "devDependencies": {
+    "@ianvs/prettier-plugin-sort-imports": "4.1.1",
+    "@types/chrome": "0.0.258",
+    "@types/node": "20.11.5",
+    "@types/react": "18.2.48",
+    "@types/react-dom": "18.2.18",
+    "@types/uuid": "^11.0.0",
+    "postcss": "8.4.33",
+    "prettier": "3.2.4",
+    "typescript": "5.3.3"
+  },
+  "manifest": {
+    "permissions": [
+      "storage",
+      "scripting"
+    ],
+    "host_permissions": [
+      "https://www.youtube.com/*",
+      "https://youtube.com/*",
+      "https://www.youtube-nocookie.com/*",
+      "https://api.mymemory.translated.net/*"
+    ]
+  },
+  "license": "MIT"
+}

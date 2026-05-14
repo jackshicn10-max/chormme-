@@ -1,0 +1,39 @@
+﻿# dependencies
+/node_modules
+/.pnp
+.pnp.js
+
+# generated output
+/out
+/build
+/dist
+/.plasmo
+*.tsbuildinfo
+
+# local browser/debug state
+/.edge-debug-profile
+/.playwright-cli
+
+# test/coverage
+/coverage
+
+# cache
+.turbo
+
+# local env and signing secrets
+.env*
+*.pem
+keys.json
+
+# logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# OS/editor
+.DS_Store
+Thumbs.db
+
+# local notes
+《claude 关于超时的一些建议》.md

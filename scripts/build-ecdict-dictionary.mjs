@@ -1,0 +1,235 @@
+import fs from "node:fs"
+import path from "node:path"
+
+const ECDICT_URL =
+  "https://raw.githubusercontent.com/skywind3000/ECDICT/master/ecdict.csv"
+const OUTPUT_PATH = path.resolve(
+  "src/lib/translation/ecdictDictionary.generated.ts"
+)
+const MAX_BASE_ENTRIES = 80000
+const MAX_MEANING_LENGTH = 96
+
+const parseCsv = (text) => {
+  const rows = []
+  let row = []
+  let field = ""
+  let quoted = false
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index]
+
+    if (quoted) {
+      if (char === '"' && text[index + 1] === '"') {
+        field += '"'
+        index += 1
+        continue
+      }
+      if (char === '"') {
+        quoted = false
+        continue
+      }
+      field += char
+      continue
+    }
+
+    if (char === '"') {
+      quoted = true
+      continue
+    }
+    if (char === ",") {
+      row.push(field)
+      field = ""
+      continue
+    }
+    if (char === "\n") {
+      row.push(field)
+      rows.push(row)
+      row = []
+      field = ""
+      continue
+    }
+    if (char === "\r") {
+      continue
+    }
+
+    field += char
+  }
+
+  if (field || row.length) {
+    row.push(field)
+    rows.push(row)
+  }
+
+  return rows
+}
+
+const hasChinese = (text) => /[\u3400-\u9fff]/.test(text)
+
+const normalizeWord = (word) =>
+  word
+    .replace(/[’`]/g, "'")
+    .toLowerCase()
+    .trim()
+
+const isLookupWord = (word) => /^[a-z][a-z'-]{1,31}$/.test(word)
+
+const cleanMeaning = (translation) => {
+  const lines = translation
+    .replace(/\\n/g, "\n")
+    .replace(/\r/g, "")
+    .split("\n")
+    .map((line) =>
+      line
+        .replace(/\s+/g, " ")
+        .replace(/^\[网络\]\s*/i, "")
+        .replace(/^\[.+?\]\s*/, "")
+        .trim()
+    )
+    .filter((line) => line && hasChinese(line))
+    .filter((line) => !/^网络$/i.test(line))
+
+  const unique = []
+  for (const line of lines) {
+    if (!unique.includes(line)) {
+      unique.push(line)
+    }
+    if (unique.length >= 3) {
+      break
+    }
+  }
+
+  const meaning = unique.join("；")
+  return meaning.length > MAX_MEANING_LENGTH
+    ? `${meaning.slice(0, MAX_MEANING_LENGTH)}...`
+    : meaning
+}
+
+const parsePositiveInt = (value) => {
+  const parsed = Number.parseInt(value, 10)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null
+}
+
+const scoreEntry = ({ tag, collins, oxford, bnc, frq, word }) => {
+  const bncRank = parsePositiveInt(bnc)
+  const frqRank = parsePositiveInt(frq)
+  const rank = Math.min(bncRank ?? 999999, frqRank ?? 999999)
+  let score = rank
+
+  if (tag.trim()) {
+    score -= 70000
+  }
+  if (parsePositiveInt(oxford)) {
+    score -= 65000
+  }
+  score -= (parsePositiveInt(collins) ?? 0) * 12000
+
+  if (word.includes("-") || word.includes("'")) {
+    score += 20000
+  }
+  if (word.length > 18) {
+    score += 25000
+  }
+
+  return score
+}
+
+const parseExchangeAliases = (exchange) => {
+  const aliases = []
+  for (const part of exchange.split("/")) {
+    const [, value] = part.split(":")
+    const alias = normalizeWord(value ?? "")
+    if (alias && isLookupWord(alias)) {
+      aliases.push(alias)
+    }
+  }
+  return aliases
+}
+
+const main = async () => {
+  console.log(`Downloading ECDICT from ${ECDICT_URL}`)
+  const response = await fetch(ECDICT_URL)
+  if (!response.ok) {
+    throw new Error(`Failed to download ECDICT: HTTP ${response.status}`)
+  }
+
+  const csvText = await response.text()
+  const [header, ...rows] = parseCsv(csvText)
+  const columns = Object.fromEntries(header.map((name, index) => [name, index]))
+
+  const entries = []
+  for (const row of rows) {
+    const word = normalizeWord(row[columns.word] ?? "")
+    if (!isLookupWord(word)) {
+      continue
+    }
+
+    const translation = row[columns.translation] ?? ""
+    const meaning = cleanMeaning(translation)
+    if (!meaning) {
+      continue
+    }
+
+    entries.push({
+      word,
+      meaning,
+      exchange: row[columns.exchange] ?? "",
+      score: scoreEntry({
+        word,
+        tag: row[columns.tag] ?? "",
+        collins: row[columns.collins] ?? "",
+        oxford: row[columns.oxford] ?? "",
+        bnc: row[columns.bnc] ?? "",
+        frq: row[columns.frq] ?? ""
+      })
+    })
+  }
+
+  entries.sort((left, right) => left.score - right.score)
+
+  const dictionary = new Map()
+  const selected = entries.slice(0, MAX_BASE_ENTRIES)
+  for (const entry of selected) {
+    dictionary.set(entry.word, entry.meaning)
+  }
+
+  let aliasCount = 0
+  for (const entry of selected) {
+    for (const alias of parseExchangeAliases(entry.exchange)) {
+      if (dictionary.has(alias)) {
+        continue
+      }
+      dictionary.set(alias, entry.meaning)
+      aliasCount += 1
+    }
+  }
+
+  const ordered = Array.from(dictionary.entries()).sort(([left], [right]) =>
+    left.localeCompare(right)
+  )
+  const body = ordered
+    .map(([word, meaning]) => `  ${JSON.stringify(word)}: ${JSON.stringify(meaning)}`)
+    .join(",\n")
+
+  const output = `// Generated by scripts/build-ecdict-dictionary.mjs from ECDICT.\n// Source: ${ECDICT_URL}\n// License: MIT, copyright Linwei / ECDICT contributors.\n\nexport const ECDICT_TRANSLATIONS: Record<string, string> = {\n${body}\n}\n`
+
+  fs.mkdirSync(path.dirname(OUTPUT_PATH), { recursive: true })
+  fs.writeFileSync(OUTPUT_PATH, output, "utf8")
+
+  console.log(
+    JSON.stringify(
+      {
+        outputPath: OUTPUT_PATH,
+        baseEntries: selected.length,
+        aliasCount,
+        totalEntries: ordered.length
+      },
+      null,
+      2
+    )
+  )
+}
+
+main().catch((error) => {
+  console.error(error)
+  process.exitCode = 1
+})
